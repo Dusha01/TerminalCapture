@@ -14,6 +14,7 @@ def display_help():
     print("Доступные команды:")
     print("  - list: Показать список зарегистрированных ботов с IP, ID.")
     print("  - select <bot_id>: Выбрать бота для взаимодействия.")
+    print("  - start: Запустить основной функционал.")
     print("  - exit: Выход из программы.")
     print("  - help: Показать это сообщение.")
 
@@ -56,6 +57,8 @@ def main_menu(bots):
                     print(f"Бот с ID {bot_id} не найден.")
             except IndexError:
                 print("Укажите ID бота для выбора.")
+        elif command == "start":
+            return "start"
         elif command == "exit":
             print("Выход из программы.")
             return None

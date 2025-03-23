@@ -116,24 +116,31 @@ if __name__ == "__main__":
     load_bots_from_json()
 
     while True:
-        selected_bot_id = front.main_menu(bots)
-        if selected_bot_id is None:
+        selected_option = front.main_menu(bots)
+
+        if selected_option == "start":
+            print("Запуск основного функционала...")
+            main()
+            break 
+        elif selected_option is None:
             break
+        else:
+            selected_bot_id = selected_option 
 
-        while True:
-            command = input(f"Введите команду для бота {selected_bot_id} (или 'exit' для выхода): ")
-            if command.lower() == "exit":
-                break
-
-            if selected_bot_id in client_sockets:
-                try:
-                    client_sockets[selected_bot_id].sendall(command.encode())
-                except (BrokenPipeError, ConnectionResetError):
-                    print(f"Бот {selected_bot_id} отключился.")
-                    del bots[selected_bot_id]
-                    del client_sockets[selected_bot_id]
-                    save_bots_to_json()
+            while True:
+                command = input(f"Введите команду для бота {selected_bot_id} (или 'exit' для выхода): ")
+                if command.lower() == "exit":
                     break
-            else:
-                print(f"Соединение с ботом {selected_bot_id} потеряно.")
-                break
+
+                if selected_bot_id in client_sockets:
+                    try:
+                        client_sockets[selected_bot_id].sendall(command.encode())
+                    except (BrokenPipeError, ConnectionResetError):
+                        print(f"Бот {selected_bot_id} отключился.")
+                        del bots[selected_bot_id]
+                        del client_sockets[selected_bot_id]
+                        save_bots_to_json()
+                        break
+                else:
+                    print(f"Соединение с ботом {selected_bot_id} потеряно.")
+                    break
