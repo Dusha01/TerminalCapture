@@ -2,7 +2,7 @@ import socket
 import threading
 import json
 import os
-import subprocess
+import front
 
 CONTROLLER_IP = "127.0.0.1"
 CONTROLLER_PORT = 12345
@@ -45,8 +45,8 @@ def handle_client(client_socket, client_address):
 
             if action == "register":
                 print(f"Бот {bot_id} зарегистрирован.")
-                bots[bot_id] = {"address": client_address}  # Store address only
-                client_sockets[bot_id] = client_socket  # Store the socket object
+                bots[bot_id] = {"address": client_address}
+                client_sockets[bot_id] = client_socket
                 save_bots_to_json()
                 client_socket.sendall("Регистрация успешна".encode())
             else:
@@ -64,7 +64,6 @@ def handle_client(client_socket, client_address):
                 break
 
             try:
-                # Ensure we send the command to the correct socket
                 if bot_id in client_sockets:
                     client_sockets[bot_id].sendall(command.encode())
                 else:
@@ -110,6 +109,31 @@ def main():
 
 
 if __name__ == "__main__":
+    front.picture()
     if not os.path.exists("data"):
         os.makedirs("data")
-    main()
+    
+    load_bots_from_json()
+
+    while True:
+        selected_bot_id = front.main_menu(bots)
+        if selected_bot_id is None:
+            break
+
+        while True:
+            command = input(f"Введите команду для бота {selected_bot_id} (или 'exit' для выхода): ")
+            if command.lower() == "exit":
+                break
+
+            if selected_bot_id in client_sockets:
+                try:
+                    client_sockets[selected_bot_id].sendall(command.encode())
+                except (BrokenPipeError, ConnectionResetError):
+                    print(f"Бот {selected_bot_id} отключился.")
+                    del bots[selected_bot_id]
+                    del client_sockets[selected_bot_id]
+                    save_bots_to_json()
+                    break
+            else:
+                print(f"Соединение с ботом {selected_bot_id} потеряно.")
+                break
