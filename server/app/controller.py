@@ -8,6 +8,8 @@ import ssl
 CONTROLLER_IP = "127.0.0.1"
 CONTROLLER_PORT = 12345
 BOT_DATA_FILE = "data/bots.json"
+CERT_FILE = "private_ssl/certificate.crt"
+KEY_FILE = "private_ssl/private.key"
 
 bots = {}
 client_sockets = {}
@@ -162,6 +164,9 @@ def main():
 
     load_bots_from_json()
 
+    context=ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile=CERT_FILE, keyfile = KEY_FILE)
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((CONTROLLER_IP, CONTROLLER_PORT))
     server_socket.listen(5)
@@ -169,11 +174,19 @@ def main():
     print(f"Контроллер запущен на {CONTROLLER_IP}:{CONTROLLER_PORT}")
 
     try:
-        while server_running:
+         while server_running:
             client_socket, client_address = server_socket.accept()
             print(f"Соединение от {client_address}")
+
+            try:
+                ssl_client_socket = context.wrap_socket(client_socket, server_side=True)
+            except ssl.SSLError as e:
+                print(f"Ошибка SSL при подключении {client_address}: {e}")
+                client_socket.close()
+                continue 
+
             client_thread = threading.Thread(
-                target=handle_client, args=(client_socket, client_address)
+                target=handle_client, args=(ssl_client_socket, client_address)
             )
             client_thread.daemon = True
             client_thread.start()
