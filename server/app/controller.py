@@ -3,6 +3,7 @@ import threading
 import json
 import os
 import front
+import ssl
 
 CONTROLLER_IP = "127.0.0.1"
 CONTROLLER_PORT = 12345
@@ -151,7 +152,7 @@ def server_commands():
             break
         elif command == "start":
             print("Возвращаемся к работе с ботами")
-            return # Вернуться в bot_interaction_loop
+            return
         else:
             print("Неверная команда сервера.")
 
@@ -222,7 +223,7 @@ if __name__ == "__main__":
             bot_interaction_loop(
                 selected_bot_id
             )
-        elif selected_option == "start@":
+        elif selected_option == "start":
             print("Начало работы с ботами, ожидание подключения")
             main()
             break
